@@ -240,7 +240,18 @@ Más ejemplos en [examples/](examples/)
 
 ## Licencia
 
-MIT
+Este proyecto está licenciado bajo la **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+
+Esto significa que:
+- ✅ Puedes usar, modificar y distribuir este software
+- ✅ **DEBES** mantener la misma licencia AGPL-3.0 en trabajos derivados
+- ✅ **DEBES** proporcionar el código fuente completo si lo usas en un servicio de red
+- ✅ **DEBES** incluir el aviso de copyright y licencia original
+- ✅ **DEBES** documentar los cambios realizados
+
+Ver el archivo [LICENSE](LICENSE) para más detalles.
+
+**Copyright (c) 2026 Santiago González**
 
 ## Contacto
 
