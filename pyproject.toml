@@ -1,0 +1,49 @@
+[tool.poetry]
+name = "asset-simulator"
+version = "0.1.0"
+description = "Asset simulator project"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{include = "asset_simulator"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pymodbus = "^3.15.0"
+fastapi = "^0.143.0"
+uvicorn = "^0.54.0"
+websockets = "^17.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+pytest-cov = "^6.0.0"
+black = "^24.10.0"
+ruff = "^0.7.0"
+mypy = "^1.13.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "B", "C4", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--cov=asset_simulator --cov-report=term-missing"
