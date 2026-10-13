@@ -1,6 +1,6 @@
 # Asset Simulator
 
-Simuladores de activos energéticos (baterías, inversores, paneles solares, etc.) con interfaces Modbus TCP para integración con sistemas de gestión de energía como Profitflex.
+Simuladores de activos energéticos (baterías, inversores, paneles solares, etc.) con interfaces Modbus TCP para integración con sistemas de gestión de energía.
 
 ## Características
 
@@ -157,9 +157,9 @@ poetry add <paquete>
 poetry add --group dev <paquete>
 ```
 
-## Integración con Profitflex
+## Integración
 
-Los simuladores están diseñados para conectarse con dispositivos Profitflex mediante el protocolo Modbus TCP estándar. Esto permite:
+Los simuladores están diseñados para integrarse con sistemas de gestión de energía mediante el protocolo Modbus TCP estándar. Esto permite:
 
 1. **Desarrollo y testing**: Probar integraciones sin hardware físico
 2. **Validación de estrategias**: Simular comportamiento de activos bajo diferentes condiciones
