@@ -251,7 +251,7 @@ class HuaweiMonitor:
     # --- Handlers HTTP ---
     async def handle_index(self, request):
         """Servir página principal."""
-        html_file = Path(__file__).parent / "static" / "huawei_monitor_v2.html"
+        html_file = Path(__file__).parent / "static" / "huawei_monitor_v3.html"
         return web.FileResponse(html_file)
 
     async def handle_ws(self, request):
@@ -299,6 +299,53 @@ class HuaweiMonitor:
 
             # Guardar ruta del perfil para usarla al arrancar el simulador
             self.current_profile_path = temp_file.name
+
+            # Convertir perfil a formato JSON para el frontend
+            profile_data = []
+            for _, row in profile.iterrows():
+                profile_data.append({
+                    "timestamp": row["timestamp"].isoformat(),
+                    "power_w": float(row["power_w"]),
+                })
+
+            return web.json_response({
+                "status": "ok",
+                "profile_path": temp_file.name,
+                "stats": stats,
+                "profile_data": profile_data,
+            })
+        except Exception as e:
+            return web.json_response({"status": "error", "message": str(e)}, status=400)
+
+    async def handle_load_generate(self, request):
+        """Handler para generar perfil de consumo."""
+        try:
+            from asset_simulator.utils.load_generator import LoadGenerator
+            import tempfile
+
+            data = await request.json()
+            profile_type = data.get("profile_type", "industrial")
+            date = data.get("date", "2026-06-21")
+            peak_kw = float(data.get("peak_kw", 100.0))
+            interval = int(data.get("interval", 15))
+            seed = data.get("seed")
+            if seed is not None:
+                seed = int(seed)
+
+            # Generar perfil
+            generator = LoadGenerator(profile_type, peak_kw, random_seed=seed)
+            profile = generator.generate_profile(date, interval)
+
+            # Guardar en archivo temporal
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+            generator.save_profile(profile, temp_file.name)
+            temp_file.close()
+
+            # Obtener estadísticas
+            stats = generator.get_stats(profile)
+
+            # Guardar ruta del perfil para usarla al arrancar el simulador
+            self.current_load_profile_path = temp_file.name
 
             # Convertir perfil a formato JSON para el frontend
             profile_data = []
@@ -410,6 +457,9 @@ class HuaweiMonitor:
             if self.current_profile_path:
                 cmd.extend(["--pv-profile", self.current_profile_path])
 
+            if hasattr(self, 'current_load_profile_path') and self.current_load_profile_path:
+                cmd.extend(["--load-profile", self.current_load_profile_path])
+
             self.simulator_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -488,6 +538,7 @@ async def start_server(monitor, host, port):
     app.router.add_get("/ws", monitor.handle_ws)
     app.router.add_post("/control", monitor.handle_control)
     app.router.add_post("/api/solar/generate", monitor.handle_solar_generate)
+    app.router.add_post("/api/load/generate", monitor.handle_load_generate)
     app.router.add_post("/api/simulator/start", monitor.handle_simulator_start)
     app.router.add_post("/api/simulator/stop", monitor.handle_simulator_stop)
     app.router.add_get("/api/simulator/status", monitor.handle_simulator_status)
@@ -528,3 +579,9 @@ async def main():
         log.info("Deteniendo monitor...")
     finally:
         poll_task.cancel()
+        await runner.cleanup()
+        await monitor.disconnect()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

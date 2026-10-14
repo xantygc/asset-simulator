@@ -193,12 +193,16 @@ class HuaweiSim:
         load_kw,
         profile=None,
         pv_scale=1.0,
+        load_profile=None,
+        load_scale=1.0,
         start_utc=None,
         tz=None,
     ):
         self.bat = bat
         self.profile = profile  # PVProfile o None (FV constante/manual)
         self.pv_scale = pv_scale
+        self.load_profile = load_profile  # PVProfile o None (consumo constante/manual)
+        self.load_scale = load_scale
         self.tz = tz or ZoneInfo("Europe/Madrid")
         self.start_utc = start_utc or datetime.now(timezone.utc)
         self.inv_kw = inverter_kw
@@ -271,6 +275,9 @@ class HuaweiSim:
         if self.profile is not None:  # la FV sigue el perfil según el reloj simulado
             w = self.profile.power_w(self.now_utc()) * self.pv_scale
             self.store[60000] = int(clamp(round(w), 0, 1_000_000))
+        if self.load_profile is not None:  # el consumo sigue el perfil según el reloj simulado
+            w = self.load_profile.power_w(self.now_utc()) * self.load_scale
+            self.store[60002] = int(clamp(round(w), 0, 1_000_000))
         pv = self.get(60000) / 1000.0
         load = self.get(60002) / 1000.0
         max_chg = self.get(47075) / 1000.0
@@ -523,6 +530,20 @@ def parse_args():
         default=1.0,
         help="Factor sobre el perfil, p. ej. 0.5 si el CSV era para el doble de kWp",
     )
+
+    l = p.add_argument_group("consumo desde un perfil (opcional)")
+    l.add_argument(
+        "--load-profile",
+        default=None,
+        metavar="CSV",
+        help="CSV de perfil de consumo. El consumo sigue el reloj simulado y 60002 pasa a solo lectura",
+    )
+    l.add_argument(
+        "--load-scale",
+        type=float,
+        default=1.0,
+        help="Factor sobre el perfil de consumo",
+    )
     c.add_argument(
         "--start",
         default=None,
@@ -598,7 +619,13 @@ async def main():
             profile = PVProfile.from_csv(a.pv_profile)
         except (PVError, OSError, ValueError, KeyError) as e:
             sys.exit(f"error: no se pudo cargar el perfil FV {a.pv_profile}: {e}")
-    sim = HuaweiSim(bat, a.inverter_kw, a.bus_voltage, a.pv_kw, a.load_kw, profile, a.pv_scale, a.start_utc, a.tzinfo)
+    load_profile = None
+    if a.load_profile:
+        try:
+            load_profile = PVProfile.from_csv(a.load_profile)
+        except (PVError, OSError, ValueError, KeyError) as e:
+            sys.exit(f"error: no se pudo cargar el perfil de consumo {a.load_profile}: {e}")
+    sim = HuaweiSim(bat, a.inverter_kw, a.bus_voltage, a.pv_kw, a.load_kw, profile, a.pv_scale, load_profile, a.load_scale, a.start_utc, a.tzinfo)
     if profile is not None:
         log.info(
             "Perfil FV: %s (fuente %s, %s kWp, escala x%g) | reloj simulado desde %s (%s)",
@@ -608,6 +635,13 @@ async def main():
             a.pv_scale,
             sim.now_utc().astimezone(a.tzinfo).strftime("%Y-%m-%d %H:%M"),
             a.tz,
+        )
+    if load_profile is not None:
+        log.info(
+            "Perfil Consumo: %s (fuente %s, escala x%g)",
+            a.load_profile,
+            load_profile.meta.get("source", "?"),
+            a.load_scale,
         )
 
     log.info(
