@@ -266,6 +266,11 @@ class HuaweiMonitor:
         html_file = Path(__file__).parent / "static" / "huawei_monitor_v3.html"
         return web.FileResponse(html_file)
 
+    async def handle_debug(self, request):
+        """Servir página de debug."""
+        html_file = Path(__file__).parent / "static" / "debug.html"
+        return web.FileResponse(html_file)
+
     async def handle_ws(self, request):
         """Handler WebSocket para datos en tiempo real."""
         ws = web.WebSocketResponse()
@@ -555,6 +560,7 @@ async def start_server(monitor, host, port):
     """Iniciar servidor web."""
     app = web.Application()
     app.router.add_get("/", monitor.handle_index)
+    app.router.add_get("/debug.html", monitor.handle_debug)
     app.router.add_get("/ws", monitor.handle_ws)
     app.router.add_post("/control", monitor.handle_control)
     app.router.add_post("/api/solar/generate", monitor.handle_solar_generate)
