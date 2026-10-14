@@ -54,6 +54,40 @@ poetry run python -m asset_simulator.assets.batteries.basic \
 
 **Documentación completa:** [docs/batteries/basic.md](docs/batteries/basic.md)
 
+#### [Huawei SUN2000/LUNA2000 Simulator](docs/batteries/huawei.md)
+
+Simulador completo de inversor híbrido Huawei SUN2000 + batería LUNA2000 con interfaz Modbus TCP compatible con especificación oficial.
+
+```bash
+# Sistema básico
+poetry run python -m asset_simulator.assets.batteries.huawei \
+    --power-kw 5 \
+    --capacity-kwh 10 \
+    --inverter-kw 10 \
+    --pv-kw 6 \
+    --load-kw 1.5 \
+    --port 5021
+
+# Con perfil solar real
+poetry run python -m asset_simulator.assets.batteries.huawei \
+    --pv-profile perfil_solar.csv \
+    --start "2026-06-21 07:00" \
+    --time-accel 600 \
+    --inverter-kw 5 \
+    --load-kw 0.8 \
+    --port 5021
+```
+
+**Características:**
+- Sistema completo: Inversor + Batería + FV + Medidor
+- Compatible con especificación Modbus Huawei SUN2000MA
+- Modos de operación: Autoconsumo, TOU, Inyección total, Forzado
+- Control de inyección configurable (kW, %, inyección cero)
+- Soporte para perfiles solares realistas
+- Reloj simulado con aceleración de tiempo
+
+**Documentación completa:** [docs/batteries/huawei.md](docs/batteries/huawei.md)
+
 ## Herramientas de Monitoreo
 
 ### [Battery Web Monitor](docs/clients/battery_monitor.md)

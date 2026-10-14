@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""
+Asset Simulator - Huawei Battery Monitor
+Copyright (C) 2026 Santiago González
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+"""
+"""
+Monitor web para simulador Huawei SUN2000 + LUNA2000.
+
+Proporciona interfaz web en tiempo real con:
+- Dashboard con gráficos de estado
+- Control de modos de operación
+- Configuración de límites y parámetros
+- Carga/descarga forzada
+- Control de inyección
+
+Uso:
+    python3 -m asset_simulator.clients.huawei_monitor \
+        --huawei-host localhost --huawei-port 5021 \
+        --web-port 8001
+"""
+import argparse
+import asyncio
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+
+from aiohttp import web
+from pymodbus.client import AsyncModbusTcpClient
+
+log = logging.getLogger("huawei_monitor")
+
+
+class HuaweiMonitor:
+    """Monitor del simulador Huawei con interfaz web."""
+
+    def __init__(self, modbus_host, modbus_port, modbus_unit):
+        self.modbus_host = modbus_host
+        self.modbus_port = modbus_port
+        self.modbus_unit = modbus_unit
+        self.client = None
+        self.ws_clients = set()
+
+    async def connect(self):
+        """Conectar al simulador Modbus."""
+        self.client = AsyncModbusTcpClient(self.modbus_host, port=self.modbus_port)
+        await self.client.connect()
+        log.info(f"Conectado a Huawei en {self.modbus_host}:{self.modbus_port}")
+
+    async def disconnect(self):
+        """Desconectar del simulador."""
+        if self.client:
+            self.client.close()
+
+    def _decode_i32(self, hi, lo):
+        """Decodificar int32 desde dos registros."""
+        v = (hi << 16) | lo
+        return v - 0x100000000 if v >= 0x80000000 else v
+
+    def _decode_u32(self, hi, lo):
+        """Decodificar uint32 desde dos registros."""
+        return (hi << 16) | lo
+
+    def _encode_u32(self, value):
+        """Codificar uint32 a dos registros [HI, LO]."""
+        return [(value >> 16) & 0xFFFF, value & 0xFFFF]
+
+    def _encode_i32(self, value):
+        """Codificar int32 a dos registros [HI, LO]."""
+        if value < 0:
+            value = value + 0x100000000
+        return [(value >> 16) & 0xFFFF, value & 0xFFFF]
+
+    async def read_status(self):
+        """Leer estado completo del sistema."""
+        try:
+            # Batería ESU1 (37000-37025)
+            result = await self.client.read_holding_registers(37000, 26, slave=self.modbus_unit)
+            if result.isError():
+                return None
+
+            regs = result.registers
+            status = {
+                "battery": {
+                    "status": regs[0],
+                    "status_text": ["Offline", "Espera", "Funcionando", "Fallo", "Reposo"][min(regs[0], 4)],
+                    "power_w": self._decode_i32(regs[1], regs[2]),
+                    "bus_voltage_v": regs[3] / 10.0,
+                    "soc_pct": regs[4] / 10.0,
+                    "mode": regs[6],
+                    "mode_text": ["Adaptativo", "Forzado", "TOU(LG)", "Fijo", "Máx.Autoconsumo", "Inyección Total", "TOU(LUNA)"][
+                        min(regs[6], 6)
+                    ],
+                    "rated_charge_w": self._decode_u32(regs[7], regs[8]),
+                    "rated_discharge_w": self._decode_u32(regs[9], regs[10]),
+                    "fault_id": regs[14],
+                    "today_charged_kwh": self._decode_u32(regs[15], regs[16]) / 100.0,
+                    "today_discharged_kwh": self._decode_u32(regs[17], regs[18]) / 100.0,
+                    "bus_current_a": regs[21] / 10.0,
+                    "temperature_c": regs[22] / 10.0,
+                    "time_remaining_min": regs[25],
+                },
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            # Potencias máximas disponibles (37046-37049)
+            result = await self.client.read_holding_registers(37046, 4, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["battery"]["max_charge_w"] = self._decode_u32(regs[0], regs[1])
+                status["battery"]["max_discharge_w"] = self._decode_u32(regs[2], regs[3])
+
+            # Contadores totales (37066-37069)
+            result = await self.client.read_holding_registers(37066, 4, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["battery"]["total_charged_kwh"] = self._decode_u32(regs[0], regs[1]) / 100.0
+                status["battery"]["total_discharged_kwh"] = self._decode_u32(regs[2], regs[3]) / 100.0
+
+            # Sistema de almacenamiento (37758-37766)
+            result = await self.client.read_holding_registers(37758, 9, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["storage"] = {
+                    "capacity_wh": self._decode_u32(regs[0], regs[1]),
+                    "soc_pct": regs[2] / 10.0,
+                    "status": regs[4],
+                    "voltage_v": regs[5] / 10.0,
+                    "current_a": regs[6] / 10.0,
+                    "power_w": self._decode_i32(regs[7], regs[8]),
+                }
+
+            # Medidor (37100, 37101, 37113, 37118-37122)
+            result = await self.client.read_holding_registers(37100, 3, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["meter"] = {
+                    "status": regs[0],
+                    "voltage_v": self._decode_i32(regs[1], regs[2]) / 10.0,
+                }
+
+            result = await self.client.read_holding_registers(37113, 10, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["meter"]["power_w"] = self._decode_i32(regs[0], regs[1])
+                status["meter"]["frequency_hz"] = regs[5] / 100.0
+                status["meter"]["exported_kwh"] = self._decode_i32(regs[6], regs[7]) / 100.0
+                status["meter"]["imported_kwh"] = self._decode_i32(regs[8], regs[9]) / 100.0
+
+            # Inversor (32064, 32080)
+            result = await self.client.read_holding_registers(32064, 2, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["inverter"] = {"pv_power_w": self._decode_i32(regs[0], regs[1])}
+
+            result = await self.client.read_holding_registers(32080, 2, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["inverter"]["ac_power_w"] = self._decode_i32(regs[0], regs[1])
+
+            # Registros de control (47081-47102)
+            result = await self.client.read_holding_registers(47081, 22, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["control"] = {
+                    "charge_cutoff_pct": regs[0] / 10.0,
+                    "discharge_cutoff_pct": regs[1] / 10.0,
+                    "forced_duration_min": regs[2],
+                    "forced_power_w": self._decode_i32(regs[3], regs[4]),
+                    "work_mode": regs[5],
+                    "grid_charge": regs[6],
+                    "grid_charge_soc_pct": regs[7] / 10.0,
+                    "forced_command": regs[19],
+                    "target_soc_pct": regs[20] / 10.0,
+                    "backup_soc_pct": regs[21] / 10.0,
+                }
+
+            # Control de inyección (47415-47418)
+            result = await self.client.read_holding_registers(47415, 4, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["control"]["injection_control"] = regs[0]
+                status["control"]["injection_limit_w"] = self._decode_i32(regs[1], regs[2])
+                status["control"]["injection_limit_pct"] = regs[3] / 10.0
+
+            # Registros extendidos (60000-60004)
+            result = await self.client.read_holding_registers(60000, 6, slave=self.modbus_unit)
+            if not result.isError():
+                regs = result.registers
+                status["extended"] = {
+                    "pv_available_w": self._decode_u32(regs[0], regs[1]),
+                    "load_w": self._decode_u32(regs[2], regs[3]),
+                    "sim_time": self._decode_u32(regs[4], regs[5]),
+                }
+
+            return status
+
+        except Exception as e:
+            log.error(f"Error leyendo estado: {e}")
+            return None
+
+    async def write_register(self, address, value):
+        """Escribir un registro."""
+        try:
+            await self.client.write_register(address, value, slave=self.modbus_unit)
+            return True
+        except Exception as e:
+            log.error(f"Error escribiendo registro {address}: {e}")
+            return False
+
+    async def write_registers(self, address, values):
+        """Escribir múltiples registros."""
+        try:
+            await self.client.write_registers(address, values, slave=self.modbus_unit)
+            return True
+        except Exception as e:
+            log.error(f"Error escribiendo registros {address}: {e}")
+            return False
+
+    async def poll_loop(self):
+        """Loop de polling de estado."""
+        while True:
+            status = await self.read_status()
+            if status:
+                # Enviar a todos los clientes WebSocket
+                msg = json.dumps(status)
+                for ws in list(self.ws_clients):
+                    try:
+                        await ws.send_str(msg)
+                    except Exception:
+                        self.ws_clients.discard(ws)
+            await asyncio.sleep(1.0)
+
+    # --- Handlers HTTP ---
+    async def handle_index(self, request):
+        """Servir página principal."""
+        html_file = Path(__file__).parent / "static" / "huawei_monitor.html"
+        return web.FileResponse(html_file)
+
+    async def handle_ws(self, request):
+        """Handler WebSocket para datos en tiempo real."""
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        self.ws_clients.add(ws)
+
+        try:
+            async for msg in ws:
+                pass  # No esperamos mensajes del cliente en este caso
+        finally:
+            self.ws_clients.discard(ws)
+
+        return ws
+
+    async def handle_control(self, request):
+        """Handler para comandos de control."""
+        data = await request.json()
+        action = data.get("action")
+
+        if action == "set_mode":
+            mode = int(data.get("mode", 2))
+            await self.write_register(47086, mode)
+
+        elif action == "set_limits":
+            soc_min = int(float(data.get("soc_min", 15)) * 10)
+            soc_max = int(float(data.get("soc_max", 95)) * 10)
+            await self.write_register(47082, soc_min)
+            await self.write_register(47081, soc_max)
+
+        elif action == "set_backup":
+            soc_backup = int(float(data.get("soc_backup", 20)) * 10)
+            await self.write_register(47102, soc_backup)
+
+        elif action == "force_charge":
+            target_soc = int(float(data.get("target_soc", 90)) * 10)
+            power_w = int(data.get("power_w", 5000))
+            await self.write_register(47101, target_soc)
+            await self.write_registers(47247, self._encode_u32(power_w))
+            await self.write_register(47100, 1)
+
+        elif action == "force_discharge":
+            target_soc = int(float(data.get("target_soc", 20)) * 10)
+            power_w = int(data.get("power_w", 5000))
+            await self.write_register(47101, target_soc)
+            await self.write_registers(47249, self._encode_u32(power_w))
+            await self.write_register(47100, 2)
+
+        elif action == "stop_forced":
+            await self.write_register(47100, 0)
+
+        elif action == "set_injection":
+            control = int(data.get("control", 0))
+            await self.write_register(47415, control)
+            if control == 6:  # Límite en kW
+                limit_w = int(data.get("limit_w", 5000))
+                await self.write_registers(47416, self._encode_i32(limit_w))
+            elif control == 7:  # Límite en %
+                limit_pct = int(float(data.get("limit_pct", 100)) * 10)
+                await self.write_register(47418, limit_pct)
+
+        elif action == "set_pv":
+            pv_w = int(data.get("pv_w", 0))
+            await self.write_registers(60000, self._encode_u32(pv_w))
+
+        elif action == "set_load":
+            load_w = int(data.get("load_w", 0))
+            await self.write_registers(60002, self._encode_u32(load_w))
+
+        return web.json_response({"status": "ok"})
+
+
+async def start_server(monitor, host, port):
+    """Iniciar servidor web."""
+    app = web.Application()
+    app.router.add_get("/", monitor.handle_index)
+    app.router.add_get("/ws", monitor.handle_ws)
+    app.router.add_post("/control", monitor.handle_control)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port)
+    await site.start()
+
+    log.info(f"Monitor web iniciado en http://{host}:{port}")
+    return runner
+
+
+async def main():
+    """Punto de entrada principal."""
+    parser = argparse.ArgumentParser(description="Monitor web para simulador Huawei")
+    parser.add_argument("--huawei-host", default="localhost", help="Host del simulador Huawei")
+    parser.add_argument("--huawei-port", type=int, default=5021, help="Puerto Modbus del simulador")
+    parser.add_argument("--huawei-unit", type=int, default=1, help="Unit ID Modbus")
+    parser.add_argument("--web-host", default="0.0.0.0", help="Host del servidor web")
+    parser.add_argument("--web-port", type=int, default=8001, help="Puerto del servidor web")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+
+    monitor = HuaweiMonitor(args.huawei_host, args.huawei_port, args.huawei_unit)
+
+    await monitor.connect()
+
+    runner = await start_server(monitor, args.web_host, args.web_port)
+
+    # Iniciar loop de polling
+    poll_task = asyncio.create_task(monitor.poll_loop())
+
+    try:
+        await asyncio.Event().wait()
+    except KeyboardInterrupt:
+        log.info("Deteniendo monitor...")
+    finally:
+        poll_task.cancel()
+        await runner.cleanup()
+        await monitor.disconnect()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

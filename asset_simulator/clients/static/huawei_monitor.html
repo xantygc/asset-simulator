@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Huawei Monitor - Real Time</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .connection-status.connected {
+            background: #10b981;
+            color: white;
+        }
+
+        .connection-status.disconnected {
+            background: #ef4444;
+            color: white;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .metric-label {
+            font-size: 0.85em;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #1f2937;
+        }
+
+        .metric-unit {
+            font-size: 0.6em;
+            color: #6b7280;
+            margin-left: 5px;
+        }
+
+        .metric-subtitle {
+            font-size: 0.8em;
+            color: #9ca3af;
+            margin-top: 5px;
+        }
+
+        .state-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .state-standby {
+            background: #d1d5db;
+            color: #374151;
+        }
+
+        .state-charging {
+            background: #34d399;
+            color: white;
+        }
+
+        .state-discharging {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .chart-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .chart-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 15px;
+        }
+
+        .chart-help {
+            font-size: 0.75em;
+            color: #6b7280;
+            margin-top: 10px;
+            font-style: italic;
+        }
+
+        .control-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .control-group label {
+            min-width: 120px;
+            font-weight: bold;
+        }
+
+        .control-group input,
+        .control-group select {
+            padding: 8px 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 5px;
+            font-size: 1em;
+            flex: 1;
+        }
+
+        .control-group button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .control-group button:hover {
+            background: #5568d3;
+        }
+
+        .control-group button:active {
+            transform: scale(0.98);
+        }
+
+        .debug-panel {
+            background: #1f2937;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            color: #e5e7eb;
+            font-family: 'Courier New', monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .debug-title {
+            color: #10b981;
+            font-weight: bold;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .log-entry {
+            padding: 8px;
+            margin: 5px 0;
+            border-left: 3px solid #10b981;
+            background: #111827;
+            border-radius: 3px;
+            font-size: 0.85em;
+            line-height: 1.6;
+        }
+
+        .log-time {
+            color: #9ca3af;
+            margin-right: 10px;
+        }
+
+        .log-key {
+            color: #60a5fa;
+        }
+
+        .log-value {
+            color: #34d399;
+            font-weight: bold;
+        }
+
+        .clear-logs-btn {
+            padding: 5px 10px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+
+        .clear-logs-btn:hover {
+            background: #dc2626;
+        }
+
+        footer {
+            text-align: center;
+            color: white;
+            margin-top: 20px;
+            opacity: 0.8;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e5e7eb;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981, #34d399);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.75em;
+            font-weight: bold;
+        }
+
+        .error-message {
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            color: #991b1b;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔋 Huawei Monitor</h1>
+            <p>Real-time monitoring via Modbus TCP</p>
+            <span id="connectionStatus" class="connection-status disconnected">Disconnected</span>
+        </header>
+
+        <div id="errorMessage" class="error-message"></div>
+
+        <div class="control-panel">
+            <h2 style="margin-bottom: 15px;">Control Panel</h2>
+            <div class="control-group">
+                <label>Mode:</label>
+                <select id="modeSelect">
+                    <option value="0">Standby</option>
+                    <option value="1">Run</option>
+                </select>
+                <button onclick="sendMode()">Set Mode</button>
+            </div>
+            <div class="control-group">
+                <label>Setpoint (kW):</label>
+                <input type="number" id="setpointInput" value="0" step="1" placeholder="Positive = discharge, Negative = charge">
+                <button onclick="sendSetpoint()">Set Power</button>
+            </div>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">State of Charge (SoC)</div>
+                <div class="metric-value">
+                    <span id="soc">--</span><span class="metric-unit">%</span>
+                </div>
+                <div class="progress-bar">
+                    <div id="socProgress" class="progress-fill" style="width: 0%;">0%</div>
+                </div>
+                <div class="metric-subtitle" id="storedEnergy">-- kWh stored</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-label">State of Health (SOH)</div>
+                <div class="metric-value">
+                    <span id="soh">--</span><span class="metric-unit">%</span>
+                </div>
+                <div class="progress-bar">
+                    <div id="sohProgress" class="progress-fill" style="width: 0%;">0%</div>
+                </div>
+                <div class="metric-subtitle" id="efc">-- cycles</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-label">Power</div>
+                <div class="metric-value">
+                    <span id="power">--</span><span class="metric-unit">kW</span>
+                </div>
+                <span id="stateBadge" class="state-badge state-standby">STANDBY</span>
+                <div class="metric-subtitle" id="powerLimits">Limits: --</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-label">Huawei Specs</div>
+                <div class="metric-value" style="font-size: 1.5em;">
+                    <span id="ratedPower">--</span><span class="metric-unit">kW</span>
+                </div>
+                <div class="metric-subtitle">
+                    Capacity: <span id="ratedCapacity">--</span> kWh (nominal)<br>
+                    Usable: <span id="usableCapacity">--</span> kWh
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-label">Energy Charged</div>
+                <div class="metric-value">
+                    <span id="energyCharged">--</span><span class="metric-unit">kWh</span>
+                </div>
+                <div class="metric-subtitle">Total accumulated</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-label">Energy Discharged</div>
+                <div class="metric-value">
+                    <span id="energyDischarged">--</span><span class="metric-unit">kWh</span>
+                </div>
+                <div class="metric-subtitle">Total accumulated</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-card">
+                <div class="chart-title">Power & SoC History</div>
+                <canvas id="powerChart"></canvas>
+                <div class="chart-help">💡 Usa la rueda del ratón para hacer zoom, arrastra para desplazar, doble click para reset</div>
+            </div>
+
+            <div class="chart-card">
+                <div class="chart-title">SOH & Cycles</div>
+                <canvas id="sohChart"></canvas>
+                <div class="chart-help">💡 Usa la rueda del ratón para hacer zoom, arrastra para desplazar, doble click para reset</div>
+            </div>
+        </div>
+
+        <div class="debug-panel">
+            <div class="debug-title">
+                <span>🔍 Debug Log - Modbus Signals</span>
+                <button class="clear-logs-btn" onclick="clearLogs()">Clear</button>
+            </div>
+            <div id="debugLog">
+                <div class="log-entry">
+                    <span class="log-time">--:--:--</span>
+                    <span>Waiting for data...</span>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Asset Simulator - Huawei Monitor v1.0</p>
+        </footer>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectInterval = null;
+        const maxDataPoints = 60; // Keep last 60 data points
+
+        // Data arrays for charts
+        const timestamps = [];
+        const powerData = [];
+        const socData = [];
+        const sohData = [];
+        const efcData = [];
+
+        // Initialize Charts
+        const powerChartCtx = document.getElementById('powerChart').getContext('2d');
+        const powerChart = new Chart(powerChartCtx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [
+                    {
+                        label: 'Power (kW)',
+                        data: powerData,
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'SoC (%)',
+                        data: socData,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Power (kW)'
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'SoC (%)'
+                        },
+                        min: 0,
+                        max: 100,
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                },
+                plugins: {
+                    zoom: {
+                        zoom: {
+                            wheel: {
+                                enabled: true,
+                            },
+                            pinch: {
+                                enabled: true
+                            },
+                            mode: 'x',
+                        },
+                        pan: {
+                            enabled: true,
+                            mode: 'x',
+                        },
+                        limits: {
+                            x: {min: 'original', max: 'original'},
+                        }
+                    }
+                }
+            }
+        });
+
+        const sohChartCtx = document.getElementById('sohChart').getContext('2d');
+        const sohChart = new Chart(sohChartCtx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [
+                    {
+                        label: 'SOH (%)',
+                        data: sohData,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'EFC (cycles)',
+                        data: efcData,
+                        borderColor: '#ec4899',
+                        backgroundColor: 'rgba(236, 72, 153, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'SOH (%)'
+                        },
+                        min: 0,
+                        max: 100
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'EFC (cycles)'
+                        },
+                        min: 0,
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                },
+                plugins: {
+                    zoom: {
+                        zoom: {
+                            wheel: {
+                                enabled: true,
+                            },
+                            pinch: {
+                                enabled: true
+                            },
+                            mode: 'x',
+                        },
+                        pan: {
+                            enabled: true,
+                            mode: 'x',
+                        },
+                        limits: {
+                            x: {min: 'original', max: 'original'},
+                        }
+                    }
+                }
+            }
+        });
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('connectionStatus').className = 'connection-status connected';
+                hideError();
+
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateUI(data);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                showError('WebSocket connection error');
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                document.getElementById('connectionStatus').className = 'connection-status disconnected';
+
+                // Try to reconnect
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(() => {
+                        console.log('Attempting to reconnect...');
+                        connectWebSocket();
+                    }, 3000);
+                }
+            };
+        }
+
+        function updateUI(data) {
+            // Log received data
+            logModbusData(data);
+
+            // Update metrics
+            document.getElementById('soc').textContent = data.soc_pct.toFixed(1);
+            document.getElementById('soh').textContent = data.soh_pct.toFixed(1);
+            document.getElementById('power').textContent = data.power_kw.toFixed(1);
+            document.getElementById('ratedPower').textContent = data.rated_power_kw.toFixed(0);
+            document.getElementById('ratedCapacity').textContent = data.rated_capacity_kwh.toFixed(0);
+            document.getElementById('usableCapacity').textContent = data.usable_capacity_kwh.toFixed(1);
+            document.getElementById('storedEnergy').textContent = `${data.stored_energy_kwh.toFixed(1)} kWh stored`;
+            document.getElementById('energyCharged').textContent = data.energy_charged_kwh.toFixed(1);
+            document.getElementById('energyDischarged').textContent = data.energy_discharged_kwh.toFixed(1);
+            document.getElementById('efc').textContent = `${data.efc.toFixed(2)} equivalent cycles`;
+            document.getElementById('powerLimits').textContent =
+                `Max discharge: ${data.max_discharge_kw.toFixed(1)} kW | Max charge: ${data.max_charge_kw.toFixed(1)} kW`;
+
+            // Update progress bars
+            const socProgress = document.getElementById('socProgress');
+            socProgress.style.width = `${data.soc_pct}%`;
+            socProgress.textContent = `${data.soc_pct.toFixed(1)}%`;
+
+            const sohProgress = document.getElementById('sohProgress');
+            sohProgress.style.width = `${data.soh_pct}%`;
+            sohProgress.textContent = `${data.soh_pct.toFixed(1)}%`;
+
+            // Update state badge
+            const stateBadge = document.getElementById('stateBadge');
+            const states = ['STANDBY', 'CHARGING', 'DISCHARGING'];
+            const stateClasses = ['state-standby', 'state-charging', 'state-discharging'];
+            stateBadge.textContent = states[data.state];
+            stateBadge.className = `state-badge ${stateClasses[data.state]}`;
+
+            // Update charts
+            const time = new Date(data.timestamp).toLocaleTimeString();
+            timestamps.push(time);
+            powerData.push(data.power_kw);
+            socData.push(data.soc_pct);
+            sohData.push(data.soh_pct);
+            efcData.push(data.efc);
+
+            // Keep only last N data points
+            if (timestamps.length > maxDataPoints) {
+                timestamps.shift();
+                powerData.shift();
+                socData.shift();
+                sohData.shift();
+                efcData.shift();
+            }
+
+            powerChart.update('none');
+            sohChart.update('none');
+        }
+
+        function sendMode() {
+            const mode = parseInt(document.getElementById('modeSelect').value);
+            sendControl({ type: 'control', mode: mode });
+        }
+
+        function sendSetpoint() {
+            const setpoint = parseFloat(document.getElementById('setpointInput').value);
+            sendControl({ type: 'control', setpoint_kw: setpoint });
+        }
+
+        function sendControl(data) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(data));
+                console.log('Sent control:', data);
+            } else {
+                showError('WebSocket not connected. Cannot send control command.');
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').style.display = 'none';
+        }
+
+        let logCounter = 0;
+        const maxLogs = 50;
+
+        function logModbusData(data) {
+            const logDiv = document.getElementById('debugLog');
+            const time = new Date().toLocaleTimeString();
+
+            // Create log entry
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.innerHTML = `
+                <span class="log-time">${time}</span>
+                <span class="log-key">State:</span> <span class="log-value">${['Standby', 'Charging', 'Discharging'][data.state]}</span> |
+                <span class="log-key">Power:</span> <span class="log-value">${data.power_kw.toFixed(1)} kW</span> |
+                <span class="log-key">SoC:</span> <span class="log-value">${data.soc_pct.toFixed(1)}%</span> |
+                <span class="log-key">SOH:</span> <span class="log-value">${data.soh_pct.toFixed(1)}%</span> |
+                <span class="log-key">Heartbeat:</span> <span class="log-value">${data.heartbeat}</span>
+            `;
+
+            // Add to top of log
+            if (logDiv.firstChild) {
+                logDiv.insertBefore(logEntry, logDiv.firstChild);
+            } else {
+                logDiv.appendChild(logEntry);
+            }
+
+            logCounter++;
+
+            // Remove old entries
+            while (logDiv.children.length > maxLogs) {
+                logDiv.removeChild(logDiv.lastChild);
+            }
+
+            // Auto-scroll if at bottom
+            const debugPanel = logDiv.parentElement;
+            if (debugPanel.scrollHeight - debugPanel.scrollTop <= debugPanel.clientHeight + 50) {
+                logEntry.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        function clearLogs() {
+            const logDiv = document.getElementById('debugLog');
+            logDiv.innerHTML = '<div class="log-entry"><span class="log-time">--:--:--</span><span>Logs cleared. Waiting for data...</span></div>';
+            logCounter = 0;
+        }
+
+        // Connect on page load
+        connectWebSocket();
+    </script>
+</body>
+</html>
