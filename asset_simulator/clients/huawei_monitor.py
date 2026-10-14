@@ -88,7 +88,7 @@ class HuaweiMonitor:
         """Leer estado completo del sistema."""
         try:
             # Batería ESU1 (37000-37025)
-            result = await self.client.read_holding_registers(37000, 26, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(37000, count=26, device_id=self.modbus_unit)
             if result.isError():
                 return None
 
@@ -117,21 +117,21 @@ class HuaweiMonitor:
             }
 
             # Potencias máximas disponibles (37046-37049)
-            result = await self.client.read_holding_registers(37046, 4, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(37046, count=4, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["battery"]["max_charge_w"] = self._decode_u32(regs[0], regs[1])
                 status["battery"]["max_discharge_w"] = self._decode_u32(regs[2], regs[3])
 
             # Contadores totales (37066-37069)
-            result = await self.client.read_holding_registers(37066, 4, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(37066, count=4, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["battery"]["total_charged_kwh"] = self._decode_u32(regs[0], regs[1]) / 100.0
                 status["battery"]["total_discharged_kwh"] = self._decode_u32(regs[2], regs[3]) / 100.0
 
             # Sistema de almacenamiento (37758-37766)
-            result = await self.client.read_holding_registers(37758, 9, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(37758, count=9, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["storage"] = {
@@ -144,7 +144,7 @@ class HuaweiMonitor:
                 }
 
             # Medidor (37100, 37101, 37113, 37118-37122)
-            result = await self.client.read_holding_registers(37100, 3, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(37100, count=3, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["meter"] = {
@@ -152,7 +152,7 @@ class HuaweiMonitor:
                     "voltage_v": self._decode_i32(regs[1], regs[2]) / 10.0,
                 }
 
-            result = await self.client.read_holding_registers(37113, 10, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(37113, count=10, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["meter"]["power_w"] = self._decode_i32(regs[0], regs[1])
@@ -161,18 +161,18 @@ class HuaweiMonitor:
                 status["meter"]["imported_kwh"] = self._decode_i32(regs[8], regs[9]) / 100.0
 
             # Inversor (32064, 32080)
-            result = await self.client.read_holding_registers(32064, 2, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(32064, count=2, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["inverter"] = {"pv_power_w": self._decode_i32(regs[0], regs[1])}
 
-            result = await self.client.read_holding_registers(32080, 2, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(32080, count=2, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["inverter"]["ac_power_w"] = self._decode_i32(regs[0], regs[1])
 
             # Registros de control (47081-47102)
-            result = await self.client.read_holding_registers(47081, 22, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(47081, count=22, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["control"] = {
@@ -189,7 +189,7 @@ class HuaweiMonitor:
                 }
 
             # Control de inyección (47415-47418)
-            result = await self.client.read_holding_registers(47415, 4, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(47415, count=4, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["control"]["injection_control"] = regs[0]
@@ -197,7 +197,7 @@ class HuaweiMonitor:
                 status["control"]["injection_limit_pct"] = regs[3] / 10.0
 
             # Registros extendidos (60000-60004)
-            result = await self.client.read_holding_registers(60000, 6, slave=self.modbus_unit)
+            result = await self.client.read_holding_registers(60000, count=6, device_id=self.modbus_unit)
             if not result.isError():
                 regs = result.registers
                 status["extended"] = {
@@ -215,7 +215,7 @@ class HuaweiMonitor:
     async def write_register(self, address, value):
         """Escribir un registro."""
         try:
-            await self.client.write_register(address, value, slave=self.modbus_unit)
+            await self.client.write_register(address, value, device_id=self.modbus_unit)
             return True
         except Exception as e:
             log.error(f"Error escribiendo registro {address}: {e}")
@@ -224,7 +224,7 @@ class HuaweiMonitor:
     async def write_registers(self, address, values):
         """Escribir múltiples registros."""
         try:
-            await self.client.write_registers(address, values, slave=self.modbus_unit)
+            await self.client.write_registers(address, values, device_id=self.modbus_unit)
             return True
         except Exception as e:
             log.error(f"Error escribiendo registros {address}: {e}")
