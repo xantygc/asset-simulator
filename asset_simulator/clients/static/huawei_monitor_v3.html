@@ -608,7 +608,7 @@ document.getElementById('startSimBtn').addEventListener('click', async () => {
             document.getElementById('simAlert').innerHTML = '<div class="alert alert-success">✓ Simulador iniciado</div>';
             document.getElementById('simStatus').className = 'status-badge running';
             document.getElementById('simStatus').textContent = 'RUNNING';
-            setTimeout(() => location.reload(), 2000);
+            // No recargar la página para mantener los perfiles generados
         } else {
             document.getElementById('simAlert').innerHTML = `<div class="alert alert-error">Error: ${result.message}</div>`;
         }

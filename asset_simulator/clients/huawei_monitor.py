@@ -239,6 +239,18 @@ class HuaweiMonitor:
         while True:
             status = await self.read_status()
             if status:
+                # Añadir campos simplificados para el frontend
+                if "extended" in status:
+                    status["pv_power_w"] = status["extended"].get("pv_available_w", 0)
+                    status["load_power_w"] = status["extended"].get("load_w", 0)
+                    status["simulated_time"] = status["extended"].get("sim_time", 0)
+
+                if "battery" in status:
+                    status["battery_power_w"] = status["battery"].get("power_w", 0)
+
+                if "storage" in status:
+                    status["soc"] = status["storage"].get("soc_pct", 0)
+
                 # Enviar a todos los clientes WebSocket
                 msg = json.dumps(status)
                 for ws in list(self.ws_clients):
