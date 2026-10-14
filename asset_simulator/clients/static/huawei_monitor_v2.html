@@ -164,6 +164,37 @@
         }
         .alert-success { background: rgba(16,185,129,0.2); border: 1px solid #10b981; color: #6ee7b7; }
         .alert-error { background: rgba(239,68,68,0.2); border: 1px solid #ef4444; color: #fca5a5; }
+    
+        .log-panel {
+            background: rgba(0,0,0,0.4);
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+        }
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: #cbd5e1;
+        }
+        .log-entry:last-child { border-bottom: none; }
+        .log-entry .timestamp { color: #fbbf24; }
+        .log-entry .register { color: #10b981; }
+        .current-time-indicator {
+            position: absolute;
+            background: #ef4444;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: white;
+            z-index: 10;
+        }
+        .status-charging { color: #10b981; }
+        .status-discharging { color: #f97316; }
+        .status-idle { color: #cbd5e1; }
     </style>
 </head>
 <body>
@@ -271,7 +302,29 @@
             </div>
         </div>
 
-        <!-- Gráfico de Perfil Solar -->
+        
+            <!-- Panel de Log Modbus -->
+            <div class="card">
+                <div class="card-title">📜 Registro Modbus (Últimos 20)</div>
+                <div class="log-panel" id="modbusLog">
+                    <div class="log-entry">Esperando datos...</div>
+                </div>
+            </div>
+
+            <!-- Indicador de Hora Actual -->
+            <div class="card">
+                <div class="card-title">🕐 Hora Simulada</div>
+                <div style="text-align: center; padding: 20px;">
+                    <div style="font-size: 2.5rem; font-weight: 700; color: #fbbf24;" id="simTime">--:--:--</div>
+                    <div style="font-size: 0.9rem; color: #cbd5e1; margin-top: 8px;" id="simDate">----</div>
+                    <div style="font-size: 1.2rem; margin-top: 15px;" id="batteryStatusIcon">⚡</div>
+                    <div style="font-size: 0.9rem; color: #cbd5e1;" id="batteryStatusText">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Gráfico de Perfil Solar -->
         <div class="grid">
             <div class="card wide-card">
                 <div class="card-title">📈 Perfil de Generación Solar del Día</div>
@@ -331,6 +384,92 @@
             soc: []
         };
         const maxDataPoints = 60;
+        let modbusLog = [];
+        const maxLogEntries = 20;
+        let currentTimeMarker = null;
+        let solarProfileData = null;
+
+        
+        // Actualizar hora simulada
+        function updateSimulatedTime(simTime) {
+            const date = new Date(simTime * 1000);
+            document.getElementById('simTime').textContent = date.toLocaleTimeString('es-ES');
+            document.getElementById('simDate').textContent = date.toLocaleDateString('es-ES');
+            
+            // Actualizar marcador en gráfico solar si existe
+            if (solarChart && solarProfileData) {
+                updateSolarChartMarker(date);
+            }
+        }
+        
+        // Añadir entrada al log Modbus
+        function addModbusLog(register, value) {
+            const timestamp = new Date().toLocaleTimeString('es-ES');
+            modbusLog.unshift({timestamp, register, value});
+            if (modbusLog.length > maxLogEntries) modbusLog.pop();
+            
+            const logHtml = modbusLog.map(entry => 
+                `<div class="log-entry"><span class="timestamp">${entry.timestamp}</span> | <span class="register">${entry.register}</span>: ${entry.value}</div>`
+            ).join('');
+            document.getElementById('modbusLog').innerHTML = logHtml;
+        }
+        
+        // Actualizar estado de batería
+        function updateBatteryStatus(powerKw) {
+            const icon = document.getElementById('batteryStatusIcon');
+            const text = document.getElementById('batteryStatusText');
+            
+            if (powerKw > 0.1) {
+                icon.textContent = '🔋⚡';
+                text.innerHTML = '<span class="status-charging">CARGANDO</span>';
+                text.innerHTML += ` (+${powerKw.toFixed(2)} kW)`;
+            } else if (powerKw < -0.1) {
+                icon.textContent = '🔋⬇️';
+                text.innerHTML = '<span class="status-discharging">DESCARGANDO</span>';
+                text.innerHTML += ` (${powerKw.toFixed(2)} kW)`;
+            } else {
+                icon.textContent = '🔋';
+                text.innerHTML = '<span class="status-idle">EN REPOSO</span>';
+            }
+        }
+        
+        // Actualizar marcador en gráfico solar
+        function updateSolarChartMarker(currentDate) {
+            const currentHour = currentDate.getHours();
+            const currentMinute = currentDate.getMinutes();
+            const currentTimeStr = `${currentHour.toString().padStart(2,'0')}:${currentMinute.toString().padStart(2,'0')}`;
+            
+            // Encontrar índice más cercano
+            let closestIndex = 0;
+            let minDiff = Infinity;
+            solarProfileData.forEach((d, idx) => {
+                const time = new Date(d.timestamp);
+                const diff = Math.abs(time - currentDate);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestIndex = idx;
+                }
+            });
+            
+            // Añadir anotación al gráfico
+            if (solarChart && solarChart.options.plugins.annotation) {
+                solarChart.options.plugins.annotation.annotations = {
+                    line1: {
+                        type: 'line',
+                        xMin: closestIndex,
+                        xMax: closestIndex,
+                        borderColor: '#ef4444',
+                        borderWidth: 2,
+                        label: {
+                            enabled: true,
+                            content: `Ahora: ${currentTimeStr}`,
+                            position: 'start'
+                        }
+                    }
+                };
+                solarChart.update('none');
+            }
+        }
 
         // Inicializar fecha actual
         document.getElementById('date').valueAsDate = new Date();
@@ -394,6 +533,21 @@
                 realtimeData.soc.shift();
             }
             
+            
+            // Actualizar hora simulada
+            if (ext.sim_time) {
+                updateSimulatedTime(ext.sim_time);
+            }
+            
+            // Actualizar estado de batería
+            const batteryPowerKw = bat.power_w / 1000;
+            updateBatteryStatus(batteryPowerKw);
+            
+            // Log Modbus
+            addModbusLog('SOC', `${bat.soc_pct?.toFixed(1)}%`);
+            addModbusLog('Battery Power', `${batteryPowerKw.toFixed(2)} kW`);
+            addModbusLog('PV Power', `${((inv.pv_power_w || 0) / 1000).toFixed(2)} kW`);
+
             updateRealtimeChart();
         }
 
@@ -439,6 +593,7 @@
 
         // Mostrar perfil solar
         function displaySolarProfile(profileData, stats) {
+            solarProfileData = profileData;  // Guardar globalmente
             document.getElementById('solarStats').style.display = 'grid';
             
             document.getElementById('statPeak').textContent = `${(stats.peak_power_w / 1000).toFixed(2)} kW`;
@@ -585,6 +740,88 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'set_mode', mode })
             });
+        }
+
+        
+        // Actualizar hora simulada
+        function updateSimulatedTime(simTime) {
+            const date = new Date(simTime * 1000);
+            document.getElementById('simTime').textContent = date.toLocaleTimeString('es-ES');
+            document.getElementById('simDate').textContent = date.toLocaleDateString('es-ES');
+            
+            // Actualizar marcador en gráfico solar si existe
+            if (solarChart && solarProfileData) {
+                updateSolarChartMarker(date);
+            }
+        }
+        
+        // Añadir entrada al log Modbus
+        function addModbusLog(register, value) {
+            const timestamp = new Date().toLocaleTimeString('es-ES');
+            modbusLog.unshift({timestamp, register, value});
+            if (modbusLog.length > maxLogEntries) modbusLog.pop();
+            
+            const logHtml = modbusLog.map(entry => 
+                `<div class="log-entry"><span class="timestamp">${entry.timestamp}</span> | <span class="register">${entry.register}</span>: ${entry.value}</div>`
+            ).join('');
+            document.getElementById('modbusLog').innerHTML = logHtml;
+        }
+        
+        // Actualizar estado de batería
+        function updateBatteryStatus(powerKw) {
+            const icon = document.getElementById('batteryStatusIcon');
+            const text = document.getElementById('batteryStatusText');
+            
+            if (powerKw > 0.1) {
+                icon.textContent = '🔋⚡';
+                text.innerHTML = '<span class="status-charging">CARGANDO</span>';
+                text.innerHTML += ` (+${powerKw.toFixed(2)} kW)`;
+            } else if (powerKw < -0.1) {
+                icon.textContent = '🔋⬇️';
+                text.innerHTML = '<span class="status-discharging">DESCARGANDO</span>';
+                text.innerHTML += ` (${powerKw.toFixed(2)} kW)`;
+            } else {
+                icon.textContent = '🔋';
+                text.innerHTML = '<span class="status-idle">EN REPOSO</span>';
+            }
+        }
+        
+        // Actualizar marcador en gráfico solar
+        function updateSolarChartMarker(currentDate) {
+            const currentHour = currentDate.getHours();
+            const currentMinute = currentDate.getMinutes();
+            const currentTimeStr = `${currentHour.toString().padStart(2,'0')}:${currentMinute.toString().padStart(2,'0')}`;
+            
+            // Encontrar índice más cercano
+            let closestIndex = 0;
+            let minDiff = Infinity;
+            solarProfileData.forEach((d, idx) => {
+                const time = new Date(d.timestamp);
+                const diff = Math.abs(time - currentDate);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestIndex = idx;
+                }
+            });
+            
+            // Añadir anotación al gráfico
+            if (solarChart && solarChart.options.plugins.annotation) {
+                solarChart.options.plugins.annotation.annotations = {
+                    line1: {
+                        type: 'line',
+                        xMin: closestIndex,
+                        xMax: closestIndex,
+                        borderColor: '#ef4444',
+                        borderWidth: 2,
+                        label: {
+                            enabled: true,
+                            content: `Ahora: ${currentTimeStr}`,
+                            position: 'start'
+                        }
+                    }
+                };
+                solarChart.update('none');
+            }
         }
 
         // Inicializar

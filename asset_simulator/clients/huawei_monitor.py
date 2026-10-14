@@ -35,6 +35,8 @@ import argparse
 import asyncio
 import json
 import logging
+import subprocess
+import signal
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +55,8 @@ class HuaweiMonitor:
         self.modbus_unit = modbus_unit
         self.client = None
         self.ws_clients = set()
+        self.simulator_process = None
+        self.current_profile_path = None
 
     async def connect(self):
         """Conectar al simulador Modbus."""
@@ -293,6 +297,9 @@ class HuaweiMonitor:
             # Obtener estadísticas
             stats = generator.get_stats(profile)
 
+            # Guardar ruta del perfil para usarla al arrancar el simulador
+            self.current_profile_path = temp_file.name
+
             # Convertir perfil a formato JSON para el frontend
             profile_data = []
             for _, row in profile.iterrows():
@@ -366,6 +373,113 @@ class HuaweiMonitor:
 
         return web.json_response({"status": "ok"})
 
+    async def handle_simulator_start(self, request):
+        """Handler para arrancar el simulador Huawei."""
+        try:
+            if self.simulator_process and self.simulator_process.poll() is None:
+                return web.json_response({
+                    "status": "error",
+                    "message": "Simulador ya está corriendo"
+                }, status=400)
+
+            data = await request.json()
+
+            power_kw = float(data.get("power_kw", 5.0))
+            capacity_kwh = float(data.get("capacity_kwh", 10.0))
+            inverter_kw = float(data.get("inverter_kw", 10.0))
+            soc = float(data.get("soc", 50.0))
+            pv_kw = float(data.get("pv_kw", 0.0))
+            load_kw = float(data.get("load_kw", 2.0))
+            efficiency = float(data.get("efficiency", 0.92))
+            port = int(data.get("port", self.modbus_port))
+
+            cmd = [
+                "poetry", "run", "python", "-m",
+                "asset_simulator.assets.batteries.huawei",
+                "--power-kw", str(power_kw),
+                "--capacity-kwh", str(capacity_kwh),
+                "--inverter-kw", str(inverter_kw),
+                "--soc", str(soc),
+                "--pv-kw", str(pv_kw),
+                "--load-kw", str(load_kw),
+                "--efficiency", str(efficiency),
+                "--port", str(port),
+                "--log-every", "10"
+            ]
+
+            if self.current_profile_path:
+                cmd.extend(["--pv-profile", self.current_profile_path])
+
+            self.simulator_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=Path(__file__).parent.parent.parent
+            )
+
+            await asyncio.sleep(2)
+
+            if self.simulator_process.poll() is not None:
+                return web.json_response({
+                    "status": "error",
+                    "message": "El simulador falló al arrancar"
+                }, status=500)
+
+            return web.json_response({
+                "status": "ok",
+                "message": "Simulador arrancado correctamente",
+                "pid": self.simulator_process.pid
+            })
+
+        except Exception as e:
+            log.error(f"Error arrancando simulador: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+
+    async def handle_simulator_stop(self, request):
+        """Handler para detener el simulador Huawei."""
+        try:
+            if not self.simulator_process or self.simulator_process.poll() is not None:
+                return web.json_response({
+                    "status": "error",
+                    "message": "Simulador no está corriendo"
+                }, status=400)
+
+            self.simulator_process.send_signal(signal.SIGTERM)
+
+            try:
+                self.simulator_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.simulator_process.kill()
+                self.simulator_process.wait()
+
+            self.simulator_process = None
+
+            return web.json_response({
+                "status": "ok",
+                "message": "Simulador detenido correctamente"
+            })
+
+        except Exception as e:
+            log.error(f"Error deteniendo simulador: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
+
+    async def handle_simulator_status(self, request):
+        """Handler para obtener estado del simulador."""
+        is_running = bool(self.simulator_process and self.simulator_process.poll() is None)
+
+        return web.json_response({
+            "status": "ok",
+            "running": is_running,
+            "pid": self.simulator_process.pid if is_running else None,
+            "profile_active": self.current_profile_path is not None
+        })
+
 
 async def start_server(monitor, host, port):
     """Iniciar servidor web."""
@@ -374,6 +488,9 @@ async def start_server(monitor, host, port):
     app.router.add_get("/ws", monitor.handle_ws)
     app.router.add_post("/control", monitor.handle_control)
     app.router.add_post("/api/solar/generate", monitor.handle_solar_generate)
+    app.router.add_post("/api/simulator/start", monitor.handle_simulator_start)
+    app.router.add_post("/api/simulator/stop", monitor.handle_simulator_stop)
+    app.router.add_get("/api/simulator/status", monitor.handle_simulator_status)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -411,9 +528,3 @@ async def main():
         log.info("Deteniendo monitor...")
     finally:
         poll_task.cancel()
-        await runner.cleanup()
-        await monitor.disconnect()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
