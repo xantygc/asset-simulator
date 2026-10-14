@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Huawei SUN2000/LUNA2000 Control Panel</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #312e81 100%);
+            color: #f1f5f9;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container { max-width: 1600px; margin: 0 auto; }
+        .header {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            padding: 20px 30px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fbbf24 0%, #f97316 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        .header .subtitle { color: #cbd5e1; font-size: 0.95rem; }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        .status-connected { background: #10b981; }
+        .status-disconnected { background: #ef4444; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .card {
+            background: rgba(255,255,255,0.08);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 18px;
+            color: #fbbf24;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .metric:last-child { border-bottom: none; }
+        .metric-label { color: #cbd5e1; font-size: 0.9rem; }
+        .metric-value {
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: #fbbf24;
+        }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: #cbd5e1;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: #f1f5f9;
+            font-size: 0.95rem;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #fbbf24;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+            margin-top: 10px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #fbbf24 0%, #f97316 100%);
+            color: #1e293b;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(251,191,36,0.3);
+        }
+        .btn-success { background: #10b981; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 15px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-top: 15px;
+        }
+        .stat-box {
+            background: rgba(0,0,0,0.3);
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-box .label { font-size: 0.85rem; color: #cbd5e1; margin-bottom: 4px; }
+        .stat-box .value { font-size: 1.3rem; font-weight: 700; color: #fbbf24; }
+        
+        .wide-card { grid-column: 1 / -1; }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fbbf24;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+        .alert-success { background: rgba(16,185,129,0.2); border: 1px solid #10b981; color: #6ee7b7; }
+        .alert-error { background: rgba(239,68,68,0.2); border: 1px solid #ef4444; color: #fca5a5; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Huawei SUN2000/LUNA2000 Control Panel</h1>
+            <div class="subtitle">
+                <span class="status-indicator status-connected" id="statusIndicator"></span>
+                <span id="statusText">Connecting...</span>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Panel de Generación Solar -->
+            <div class="card">
+                <div class="card-title">☀️ Configuración Solar</div>
+                <div class="form-group">
+                    <label>Ubicación (Latitud)</label>
+                    <input type="number" id="latitude" value="39.47" step="0.01" placeholder="39.47">
+                </div>
+                <div class="form-group">
+                    <label>Ubicación (Longitud)</label>
+                    <input type="number" id="longitude" value="-6.37" step="0.01" placeholder="-6.37">
+                </div>
+                <div class="form-group">
+                    <label>Fecha</label>
+                    <input type="date" id="date" value="">
+                </div>
+                <div class="form-group">
+                    <label>Potencia Instalada (kWp)</label>
+                    <input type="number" id="kwp" value="6.0" step="0.1" min="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Inclinación Paneles (°)</label>
+                    <input type="number" id="tilt" value="30" step="1" min="0" max="90">
+                </div>
+                <div class="form-group">
+                    <label>Orientación (° - 180=Sur)</label>
+                    <input type="number" id="azimuth" value="180" step="1" min="0" max="360">
+                </div>
+                <button class="btn btn-primary" onclick="generateSolarProfile()">
+                    <span id="generateBtnText">🌞 Generar Perfil Solar</span>
+                </button>
+                <div id="solarAlert"></div>
+            </div>
+
+            <!-- Métricas del Sistema -->
+            <div class="card">
+                <div class="card-title">📊 Estado del Sistema</div>
+                <div class="metric">
+                    <span class="metric-label">Batería</span>
+                    <span class="metric-value" id="batteryStatus">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">SoC</span>
+                    <span class="metric-value" id="soc">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Potencia Batería</span>
+                    <span class="metric-value" id="batteryPower">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Producción FV</span>
+                    <span class="metric-value" id="pvPower">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Consumo</span>
+                    <span class="metric-value" id="loadPower">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Red</span>
+                    <span class="metric-value" id="gridPower">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Modo</span>
+                    <span class="metric-value" id="workMode">--</span>
+                </div>
+            </div>
+
+            <!-- Controles del Sistema -->
+            <div class="card">
+                <div class="card-title">🎮 Control Manual</div>
+                <div class="form-group">
+                    <label>Producción FV (W)</label>
+                    <input type="number" id="pvInput" value="4000" step="100" min="0">
+                    <button class="btn btn-success" onclick="setPV()">Aplicar FV</button>
+                </div>
+                <div class="form-group">
+                    <label>Consumo (W)</label>
+                    <input type="number" id="loadInput" value="2000" step="100" min="0">
+                    <button class="btn btn-success" onclick="setLoad()">Aplicar Consumo</button>
+                </div>
+                <div class="form-group">
+                    <label>Modo de Trabajo</label>
+                    <select id="modeSelect">
+                        <option value="0">Adaptativo</option>
+                        <option value="1">Fijo</option>
+                        <option value="2" selected>Máximo Autoconsumo</option>
+                        <option value="3">TOU (LG)</option>
+                        <option value="4">Inyección Total</option>
+                        <option value="5">TOU (LUNA)</option>
+                    </select>
+                    <button class="btn btn-success" onclick="setMode()">Cambiar Modo</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráfico de Perfil Solar -->
+        <div class="grid">
+            <div class="card wide-card">
+                <div class="card-title">📈 Perfil de Generación Solar del Día</div>
+                <div id="solarStatsAlert"></div>
+                <div class="stats-grid" id="solarStats" style="display:none;">
+                    <div class="stat-box">
+                        <div class="label">Potencia Pico</div>
+                        <div class="value" id="statPeak">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Energía Diaria</div>
+                        <div class="value" id="statEnergy">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Factor Capacidad</div>
+                        <div class="value" id="statCF">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Amanecer</div>
+                        <div class="value" id="statSunrise">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Atardecer</div>
+                        <div class="value" id="statSunset">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Hora Pico</div>
+                        <div class="value" id="statPeakHour">--</div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="solarChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráfico en Tiempo Real -->
+        <div class="grid">
+            <div class="card wide-card">
+                <div class="card-title">⚡ Monitoreo en Tiempo Real</div>
+                <div class="chart-container">
+                    <canvas id="realtimeChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let solarChart = null;
+        let realtimeChart = null;
+        let realtimeData = {
+            timestamps: [],
+            pv: [],
+            battery: [],
+            grid: [],
+            soc: []
+        };
+        const maxDataPoints = 60;
+
+        // Inicializar fecha actual
+        document.getElementById('date').valueAsDate = new Date();
+
+        // WebSocket
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            
+            ws.onopen = () => {
+                document.getElementById('statusIndicator').className = 'status-indicator status-connected';
+                document.getElementById('statusText').textContent = 'Connected';
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateDashboard(data);
+            };
+            
+            ws.onerror = () => {
+                document.getElementById('statusIndicator').className = 'status-indicator status-disconnected';
+                document.getElementById('statusText').textContent = 'Connection Error';
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('statusIndicator').className = 'status-indicator status-disconnected';
+                document.getElementById('statusText').textContent = 'Disconnected - Reconnecting...';
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        // Actualizar dashboard
+        function updateDashboard(data) {
+            if (!data.battery) return;
+            
+            const bat = data.battery;
+            const inv = data.inverter || {};
+            const meter = data.meter || {};
+            const ext = data.extended || {};
+            
+            document.getElementById('batteryStatus').textContent = bat.status_text || '--';
+            document.getElementById('soc').textContent = `${bat.soc_pct?.toFixed(1) || '--'}%`;
+            document.getElementById('batteryPower').textContent = `${(bat.power_w / 1000).toFixed(2) || '--'} kW`;
+            document.getElementById('pvPower').textContent = `${((inv.pv_power_w || 0) / 1000).toFixed(2)} kW`;
+            document.getElementById('loadPower').textContent = `${((ext.load_w || 0) / 1000).toFixed(2)} kW`;
+            document.getElementById('gridPower').textContent = `${((meter.power_w || 0) / 1000).toFixed(2)} kW`;
+            document.getElementById('workMode').textContent = bat.mode_text || '--';
+            
+            // Actualizar gráfico en tiempo real
+            const now = new Date().toLocaleTimeString();
+            realtimeData.timestamps.push(now);
+            realtimeData.pv.push((inv.pv_power_w || 0) / 1000);
+            realtimeData.battery.push(bat.power_w / 1000);
+            realtimeData.grid.push((meter.power_w || 0) / 1000);
+            realtimeData.soc.push(bat.soc_pct || 0);
+            
+            if (realtimeData.timestamps.length > maxDataPoints) {
+                realtimeData.timestamps.shift();
+                realtimeData.pv.shift();
+                realtimeData.battery.shift();
+                realtimeData.grid.shift();
+                realtimeData.soc.shift();
+            }
+            
+            updateRealtimeChart();
+        }
+
+        // Generar perfil solar
+        async function generateSolarProfile() {
+            const btn = document.getElementById('generateBtnText');
+            const alert = document.getElementById('solarAlert');
+            
+            btn.innerHTML = '<span class="loading"></span> Generando...';
+            alert.innerHTML = '';
+            
+            const params = {
+                latitude: parseFloat(document.getElementById('latitude').value),
+                longitude: parseFloat(document.getElementById('longitude').value),
+                date: document.getElementById('date').value,
+                kwp: parseFloat(document.getElementById('kwp').value),
+                tilt: parseFloat(document.getElementById('tilt').value) || null,
+                azimuth: parseFloat(document.getElementById('azimuth').value),
+                interval: 15
+            };
+            
+            try {
+                const response = await fetch('/api/solar/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(params)
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'ok') {
+                    alert.innerHTML = '<div class="alert alert-success">✓ Perfil solar generado correctamente</div>';
+                    displaySolarProfile(result.profile_data, result.stats);
+                } else {
+                    alert.innerHTML = `<div class="alert alert-error">Error: ${result.message}</div>`;
+                }
+            } catch (error) {
+                alert.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+            } finally {
+                btn.textContent = '🌞 Generar Perfil Solar';
+            }
+        }
+
+        // Mostrar perfil solar
+        function displaySolarProfile(profileData, stats) {
+            document.getElementById('solarStats').style.display = 'grid';
+            
+            document.getElementById('statPeak').textContent = `${(stats.peak_power_w / 1000).toFixed(2)} kW`;
+            document.getElementById('statEnergy').textContent = `${stats.daily_energy_kwh.toFixed(2)} kWh`;
+            document.getElementById('statCF').textContent = `${(stats.capacity_factor * 100).toFixed(1)}%`;
+            document.getElementById('statSunrise').textContent = stats.sunrise;
+            document.getElementById('statSunset').textContent = stats.sunset;
+            document.getElementById('statPeakHour').textContent = stats.peak_hour;
+            
+            const labels = profileData.map(d => {
+                const time = new Date(d.timestamp);
+                return time.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+            });
+            const data = profileData.map(d => d.power_w / 1000);
+            
+            if (solarChart) {
+                solarChart.destroy();
+            }
+            
+            const ctx = document.getElementById('solarChart').getContext('2d');
+            solarChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Producción FV (kW)',
+                        data: data,
+                        borderColor: '#fbbf24',
+                        backgroundColor: 'rgba(251,191,36,0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#cbd5e1' },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        },
+                        x: {
+                            ticks: { 
+                                color: '#cbd5e1',
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Gráfico en tiempo real
+        function updateRealtimeChart() {
+            if (!realtimeChart) {
+                const ctx = document.getElementById('realtimeChart').getContext('2d');
+                realtimeChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: realtimeData.timestamps,
+                        datasets: [
+                            {
+                                label: 'FV (kW)',
+                                data: realtimeData.pv,
+                                borderColor: '#fbbf24',
+                                backgroundColor: 'rgba(251,191,36,0.1)',
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Batería (kW)',
+                                data: realtimeData.battery,
+                                borderColor: '#10b981',
+                                backgroundColor: 'rgba(16,185,129,0.1)',
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Red (kW)',
+                                data: realtimeData.grid,
+                                borderColor: '#3b82f6',
+                                backgroundColor: 'rgba(59,130,246,0.1)',
+                                tension: 0.3
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: { color: '#cbd5e1' }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                ticks: { color: '#cbd5e1' },
+                                grid: { color: 'rgba(255,255,255,0.1)' }
+                            },
+                            x: {
+                                ticks: { color: '#cbd5e1' },
+                                grid: { color: 'rgba(255,255,255,0.1)' }
+                            }
+                        }
+                    }
+                });
+            } else {
+                realtimeChart.data.labels = realtimeData.timestamps;
+                realtimeChart.data.datasets[0].data = realtimeData.pv;
+                realtimeChart.data.datasets[1].data = realtimeData.battery;
+                realtimeChart.data.datasets[2].data = realtimeData.grid;
+                realtimeChart.update('none');
+            }
+        }
+
+        // Controles
+        async function setPV() {
+            const pv_w = parseInt(document.getElementById('pvInput').value);
+            await fetch('/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'set_pv', pv_w })
+            });
+        }
+
+        async function setLoad() {
+            const load_w = parseInt(document.getElementById('loadInput').value);
+            await fetch('/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'set_load', load_w })
+            });
+        }
+
+        async function setMode() {
+            const mode = parseInt(document.getElementById('modeSelect').value);
+            await fetch('/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'set_mode', mode })
+            });
+        }
+
+        // Inicializar
+        connectWebSocket();
+    </script>
+</body>
+</html>

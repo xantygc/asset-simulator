@@ -247,7 +247,7 @@ class HuaweiMonitor:
     # --- Handlers HTTP ---
     async def handle_index(self, request):
         """Servir página principal."""
-        html_file = Path(__file__).parent / "static" / "huawei_monitor.html"
+        html_file = Path(__file__).parent / "static" / "huawei_monitor_v2.html"
         return web.FileResponse(html_file)
 
     async def handle_ws(self, request):
@@ -293,10 +293,19 @@ class HuaweiMonitor:
             # Obtener estadísticas
             stats = generator.get_stats(profile)
 
+            # Convertir perfil a formato JSON para el frontend
+            profile_data = []
+            for _, row in profile.iterrows():
+                profile_data.append({
+                    "timestamp": row["timestamp"].isoformat(),
+                    "power_w": float(row["power_w"]),
+                })
+
             return web.json_response({
                 "status": "ok",
                 "profile_path": temp_file.name,
                 "stats": stats,
+                "profile_data": profile_data,
             })
         except Exception as e:
             return web.json_response({"status": "error", "message": str(e)}, status=400)
