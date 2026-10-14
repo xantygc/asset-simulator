@@ -231,6 +231,19 @@ class HuaweiSim:
         """Obtener valor de registro."""
         return self.store[addr]
 
+    def reload_profile(self, profile_path):
+        """Recargar perfil solar desde archivo."""
+        try:
+            from asset_simulator.utils.pv_profile import PVProfile
+
+            new_profile = PVProfile.from_csv(profile_path)
+            self.profile = new_profile
+            log.info(f"Perfil solar recargado desde: {profile_path}")
+            return True
+        except Exception as e:
+            log.error(f"Error recargando perfil: {e}")
+            return False
+
     # ---- reloj simulado
     def now_utc(self):
         """Timestamp UTC actual del simulador."""

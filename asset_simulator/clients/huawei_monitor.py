@@ -264,6 +264,43 @@ class HuaweiMonitor:
 
         return ws
 
+    async def handle_solar_generate(self, request):
+        """Handler para generar perfil solar."""
+        try:
+            from asset_simulator.utils.solar_generator import SolarGenerator
+            import tempfile
+
+            data = await request.json()
+            latitude = float(data.get("latitude", 39.47))
+            longitude = float(data.get("longitude", -6.37))
+            date = data.get("date", "2026-06-21")
+            kwp = float(data.get("kwp", 6.0))
+            tilt = data.get("tilt")
+            if tilt is not None:
+                tilt = float(tilt)
+            azimuth = float(data.get("azimuth", 180))
+            interval = int(data.get("interval", 15))
+
+            # Generar perfil
+            generator = SolarGenerator(latitude, longitude, kwp, tilt, azimuth)
+            profile = generator.generate_profile(date, interval)
+
+            # Guardar en archivo temporal
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+            generator.save_profile(profile, temp_file.name)
+            temp_file.close()
+
+            # Obtener estadísticas
+            stats = generator.get_stats(profile)
+
+            return web.json_response({
+                "status": "ok",
+                "profile_path": temp_file.name,
+                "stats": stats,
+            })
+        except Exception as e:
+            return web.json_response({"status": "error", "message": str(e)}, status=400)
+
     async def handle_control(self, request):
         """Handler para comandos de control."""
         data = await request.json()
@@ -327,6 +364,7 @@ async def start_server(monitor, host, port):
     app.router.add_get("/", monitor.handle_index)
     app.router.add_get("/ws", monitor.handle_ws)
     app.router.add_post("/control", monitor.handle_control)
+    app.router.add_post("/api/solar/generate", monitor.handle_solar_generate)
 
     runner = web.AppRunner(app)
     await runner.setup()
