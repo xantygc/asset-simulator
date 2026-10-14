@@ -371,13 +371,27 @@
                 <input type="number" step="0.1" id="capacityKwh" value="10.0" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: #f1f5f9;">
             </div>
             <div>
-                <label style="color: #cbd5e1; font-size: 0.85rem; display: block; margin-bottom: 5px;">SoC Inicial (%)</label>
+                <label style="color: #cbd5e1; font-size: 0.85rem; display: block; margin-bottom: 5px;">SoC Inicial (%) <span style="color: #94a3b8; font-weight: normal;">*</span></label>
                 <input type="number" step="1" id="initialSoc" value="50" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: #f1f5f9;">
             </div>
             <div>
                 <label style="color: #cbd5e1; font-size: 0.85rem; display: block; margin-bottom: 5px;">Potencia Batería (kW)</label>
                 <input type="number" step="0.1" id="powerKw" value="5.0" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: #f1f5f9;">
             </div>
+        </div>
+        <div class="grid3" style="margin-top: 10px;">
+            <div>
+                <label style="color: #cbd5e1; font-size: 0.85rem; display: block; margin-bottom: 5px;">Potencia Inversor (kW)</label>
+                <input type="number" step="0.1" id="inverterKw" value="10.0" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: #f1f5f9;">
+            </div>
+            <div>
+                <label style="color: #cbd5e1; font-size: 0.85rem; display: block; margin-bottom: 5px;">Aceleración Tiempo (x)</label>
+                <input type="number" step="1" id="timeAccel" value="60" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: #f1f5f9;">
+            </div>
+            <div></div>
+        </div>
+        <div style="margin-top: 12px; padding: 10px; background: rgba(59,130,246,0.1); border-radius: 6px; font-size: 0.8rem; color: #94a3b8;">
+            <strong style="color: #3b82f6;">*</strong> Con perfiles activos, el SoC se calcula automáticamente desde medianoche hasta la hora actual del sistema
         </div>
         <div style="display: flex; gap: 10px; margin-top: 15px;">
             <button class="btn btn-success" id="startSimBtn" style="flex: 2;">▶ Iniciar Simulador</button>
@@ -573,12 +587,20 @@ document.getElementById('startSimBtn').addEventListener('click', async () => {
     const capacity = parseFloat(document.getElementById('capacityKwh').value);
     const soc = parseFloat(document.getElementById('initialSoc').value);
     const power = parseFloat(document.getElementById('powerKw').value);
+    const inverter = parseFloat(document.getElementById('inverterKw').value);
+    const timeAccel = parseFloat(document.getElementById('timeAccel').value);
 
     try {
         const res = await fetch('/api/simulator/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ capacity_kwh: capacity, initial_soc: soc, power_kw: power })
+            body: JSON.stringify({
+                capacity_kwh: capacity,
+                initial_soc: soc,
+                power_kw: power,
+                inverter_kw: inverter,
+                time_accel: timeAccel
+            })
         });
         const result = await res.json();
 

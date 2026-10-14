@@ -460,6 +460,14 @@ class HuaweiMonitor:
             if hasattr(self, 'current_load_profile_path') and self.current_load_profile_path:
                 cmd.extend(["--load-profile", self.current_load_profile_path])
 
+            # Si hay perfiles, usar warm-start para calcular estado inicial histórico
+            if self.current_profile_path or (hasattr(self, 'current_load_profile_path') and self.current_load_profile_path):
+                cmd.append("--warm-start")
+
+            # Aceleración de tiempo (por defecto 60x para pruebas rápidas)
+            time_accel = float(data.get("time_accel", 60.0))
+            cmd.extend(["--time-accel", str(time_accel)])
+
             self.simulator_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,

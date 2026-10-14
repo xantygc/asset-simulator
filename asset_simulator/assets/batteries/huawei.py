@@ -550,7 +550,12 @@ def parse_args():
         metavar="'AAAA-MM-DD HH:MM'",
         help="Instante inicial del reloj simulado, en hora local (def. ahora)",
     )
-    c.add_argument("--tz", default="Europe/Madrid", help="Zona horaria de --start (def. Europe/Madrid)")
+    c.add_argument("--tz", default=None, help="Zona horaria de --start (def. zona horaria del sistema)")
+    c.add_argument(
+        "--warm-start",
+        action="store_true",
+        help="Simular desde medianoche hasta --start para calcular el estado inicial basado en perfiles",
+    )
 
     g = p.add_argument_group("curva de potencia vs SoC (opcional)")
     g.add_argument("--soc-derate", action="store_true")
@@ -580,17 +585,32 @@ def parse_args():
         p.error("--pv-scale requiere --pv-profile")
     if a.pv_profile is not None and a.pv_kw:
         p.error("--pv-kw y --pv-profile son excluyentes (la FV la marca el perfil)")
-    try:
-        a.tzinfo = ZoneInfo(a.tz)
-    except (ZoneInfoNotFoundError, ValueError, OSError):
-        p.error(f"zona horaria desconocida: {a.tz!r} (en Windows: pip install tzdata)")
-    a.start_utc = None
+
+    # Detectar zona horaria del sistema si no se especifica
+    if a.tz is None:
+        try:
+            # Obtener la zona horaria local del sistema
+            local_now = datetime.now().astimezone()
+            a.tzinfo = local_now.tzinfo
+            a.tz = str(a.tzinfo)
+        except:
+            # Fallback a UTC
+            a.tzinfo = timezone.utc
+            a.tz = 'UTC'
+    else:
+        try:
+            a.tzinfo = ZoneInfo(a.tz)
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            p.error(f"zona horaria desconocida: {a.tz!r} (en Windows: pip install tzdata)")
     if a.start is not None:
         try:
             local = datetime.strptime(a.start, "%Y-%m-%d %H:%M").replace(tzinfo=a.tzinfo)
         except ValueError:
             p.error("--start debe tener el formato 'AAAA-MM-DD HH:MM'")
         a.start_utc = local.astimezone(timezone.utc)
+    else:
+        # Si no se especifica --start, usar la hora actual
+        a.start_utc = datetime.now(timezone.utc)
     if not 0 < a.efficiency <= 1 or not 0 <= a.soc <= 100:
         p.error("--efficiency en (0,1] y --soc en [0,100]")
     a.charge_from = 80.0 if a.derate_charge_from is None else a.derate_charge_from
@@ -606,13 +626,62 @@ def parse_args():
     return a
 
 
+def warm_start_simulation(a, profile, load_profile, curve, deg):
+    """
+    Ejecutar simulación desde medianoche hasta hora actual para calcular estado inicial.
+
+    Retorna el SoC calculado después de simular el día hasta la hora actual.
+    """
+    from datetime import datetime, time
+
+    # Crear timestamp de medianoche local
+    now_local = a.start_utc.astimezone(a.tzinfo)
+    midnight_local = datetime.combine(now_local.date(), time(0, 0), tzinfo=a.tzinfo)
+    midnight_utc = midnight_local.astimezone(timezone.utc)
+
+    # Calcular tiempo a simular (en segundos)
+    time_to_simulate = (a.start_utc - midnight_utc).total_seconds()
+
+    if time_to_simulate <= 0:
+        log.info("Warm-start: ya es medianoche o antes, usando SoC inicial configurado")
+        return a.soc
+
+    log.info(f"Warm-start: simulando desde medianoche hasta ahora ({time_to_simulate/3600:.2f} horas)...")
+
+    # Crear batería temporal con SoC inicial configurado
+    bat_temp = Battery(a.power_kw, a.capacity_kwh, a.soc, a.efficiency, 0, curve, deg)
+
+    # Crear simulador temporal desde medianoche
+    sim_temp = HuaweiSim(
+        bat_temp, a.inverter_kw, a.bus_voltage, a.pv_kw, a.load_kw,
+        profile, a.pv_scale, load_profile, a.load_scale,
+        midnight_utc, a.tzinfo
+    )
+
+    # Simular en pasos de 1 minuto (60 segundos)
+    dt = 60.0
+    elapsed = 0.0
+    steps = 0
+
+    while elapsed < time_to_simulate:
+        sim_temp.step(dt)
+        elapsed += dt
+        steps += 1
+
+    final_soc = bat_temp.soc
+    log.info(f"Warm-start: {steps} pasos simulados | SoC inicial: {a.soc:.1f}% → SoC calculado: {final_soc:.1f}%")
+    log.info(f"Warm-start: Energía cargada: {bat_temp.e_charged_kwh:.2f} kWh | Descargada: {bat_temp.e_discharged_kwh:.2f} kWh")
+
+    return final_soc
+
+
 async def main():
     """Punto de entrada principal."""
     a = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     curve = DerateCurve(a.soc_derate, a.charge_from, a.discharge_below, a.min_factor)
     deg = Degradation(a.degradation, a.soh0 / 100.0, a.fade / 100.0, a.soh_min / 100.0)
-    bat = Battery(a.power_kw, a.capacity_kwh, a.soc, a.efficiency, a.ramp_kw_s, curve, deg)
+
     profile = None
     if a.pv_profile:
         try:
@@ -625,6 +694,14 @@ async def main():
             load_profile = PVProfile.from_csv(a.load_profile)
         except (PVError, OSError, ValueError, KeyError) as e:
             sys.exit(f"error: no se pudo cargar el perfil de consumo {a.load_profile}: {e}")
+
+    # Aplicar warm-start si está habilitado
+    initial_soc = a.soc
+    if a.warm_start and (profile is not None or load_profile is not None):
+        initial_soc = warm_start_simulation(a, profile, load_profile, curve, deg)
+
+    # Crear batería con el SoC calculado (o configurado si no hay warm-start)
+    bat = Battery(a.power_kw, a.capacity_kwh, initial_soc, a.efficiency, a.ramp_kw_s, curve, deg)
     sim = HuaweiSim(bat, a.inverter_kw, a.bus_voltage, a.pv_kw, a.load_kw, profile, a.pv_scale, load_profile, a.load_scale, a.start_utc, a.tzinfo)
     if profile is not None:
         log.info(
