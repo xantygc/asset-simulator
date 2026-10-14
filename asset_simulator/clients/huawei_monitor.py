@@ -57,6 +57,7 @@ class HuaweiMonitor:
         self.ws_clients = set()
         self.simulator_process = None
         self.current_profile_path = None
+        self.current_load_profile_path = None
 
     async def connect(self):
         """Conectar al simulador Modbus."""
@@ -236,10 +237,20 @@ class HuaweiMonitor:
 
     async def poll_loop(self):
         """Loop de polling de estado."""
+        reconnect_attempts = 0
         while True:
             status = await self.read_status()
+
             if status:
-                # Añadir campos simplificados para el frontend
+                reconnect_attempts = 0  # Reset counter on successful read
+
+                # Añadir campos simplificados para el frontend (SIEMPRE, aunque sean 0)
+                status["pv_power_w"] = 0
+                status["load_power_w"] = 0
+                status["battery_power_w"] = 0
+                status["soc"] = 0
+                status["simulated_time"] = 0
+
                 if "extended" in status:
                     status["pv_power_w"] = status["extended"].get("pv_available_w", 0)
                     status["load_power_w"] = status["extended"].get("load_w", 0)
@@ -258,17 +269,28 @@ class HuaweiMonitor:
                         await ws.send_str(msg)
                     except Exception:
                         self.ws_clients.discard(ws)
+            else:
+                # Fallo al leer - intentar reconectar cada 5 intentos
+                reconnect_attempts += 1
+                if reconnect_attempts >= 5:
+                    try:
+                        log.info("Intentando reconectar...")
+                        if self.client:
+                            self.client.close()
+                        self.client = AsyncModbusTcpClient(self.modbus_host, port=self.modbus_port)
+                        await self.client.connect()
+                        if self.client.connected:
+                            log.info(f"Reconectado a Huawei en {self.modbus_host}:{self.modbus_port}")
+                        reconnect_attempts = 0
+                    except Exception:
+                        pass
+
             await asyncio.sleep(1.0)
 
     # --- Handlers HTTP ---
     async def handle_index(self, request):
         """Servir página principal."""
-        html_file = Path(__file__).parent / "static" / "huawei_monitor_v3.html"
-        return web.FileResponse(html_file)
-
-    async def handle_debug(self, request):
-        """Servir página de debug."""
-        html_file = Path(__file__).parent / "static" / "debug.html"
+        html_file = Path(__file__).parent / "static" / "huawei_monitor.html"
         return web.FileResponse(html_file)
 
     async def handle_ws(self, request):
@@ -560,7 +582,6 @@ async def start_server(monitor, host, port):
     """Iniciar servidor web."""
     app = web.Application()
     app.router.add_get("/", monitor.handle_index)
-    app.router.add_get("/debug.html", monitor.handle_debug)
     app.router.add_get("/ws", monitor.handle_ws)
     app.router.add_post("/control", monitor.handle_control)
     app.router.add_post("/api/solar/generate", monitor.handle_solar_generate)

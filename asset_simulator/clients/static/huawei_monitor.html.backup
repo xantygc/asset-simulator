@@ -619,7 +619,10 @@ document.getElementById('startSimBtn').addEventListener('click', async () => {
 
 document.getElementById('stopSimBtn').addEventListener('click', async () => {
     try {
-        const res = await fetch('/api/simulator/stop', { method: 'POST' });
+        const res = await fetch('/api/simulator/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
         const result = await res.json();
 
         if (result.status === 'ok') {
@@ -654,10 +657,10 @@ function updateDashboard(data) {
         document.getElementById('simTime').textContent = dt.toLocaleTimeString('es');
     }
 
-    // Energy flow
-    const pv = data.pv_power_w || 0;
-    const load = data.load_power_w || 0;
-    const bat = data.battery_power_w || 0;
+    // Energy flow (usar !== undefined para permitir valor 0)
+    const pv = data.pv_power_w !== undefined ? data.pv_power_w : 0;
+    const load = data.load_power_w !== undefined ? data.load_power_w : 0;
+    const bat = data.battery_power_w !== undefined ? data.battery_power_w : 0;
     const balance = pv - load;
 
     document.getElementById('pvPower').textContent = Math.round(pv);
@@ -671,11 +674,11 @@ function updateDashboard(data) {
     if (bat > 100) {
         batteryArrow.className = 'flow-arrow charging';
         batteryDir.textContent = '⬆';
-        batteryDir.parentElement.innerHTML = '<span>Batería (Cargando)</span>';
+        batteryDir.parentElement.firstElementChild.textContent = 'Batería (Cargando)';
     } else if (bat < -100) {
         batteryArrow.className = 'flow-arrow import';
         batteryDir.textContent = '⬇';
-        batteryDir.parentElement.innerHTML = '<span>Batería (Descargando)</span>';
+        batteryDir.parentElement.firstElementChild.textContent = 'Batería (Descargando)';
     } else {
         batteryArrow.className = 'flow-arrow';
         batteryDir.textContent = '↔';
@@ -689,11 +692,11 @@ function updateDashboard(data) {
     if (grid > 100) {
         gridArrow.className = 'flow-arrow export';
         gridDir.textContent = '⬆';
-        gridDir.parentElement.innerHTML = '<span>Red (Exportando)</span>';
+        gridDir.parentElement.firstElementChild.textContent = 'Red (Exportando)';
     } else if (grid < -100) {
         gridArrow.className = 'flow-arrow import';
         gridDir.textContent = '⬇';
-        gridDir.parentElement.innerHTML = '<span>Red (Importando)</span>';
+        gridDir.parentElement.firstElementChild.textContent = 'Red (Importando)';
     } else {
         gridArrow.className = 'flow-arrow';
         gridDir.textContent = '↔';
@@ -712,7 +715,7 @@ function updateDashboard(data) {
         batteryChart.data.datasets[1].data.shift();
     }
     batteryChart.data.labels.push(now);
-    batteryChart.data.datasets[0].data.push(data.soc || 0);
+    batteryChart.data.datasets[0].data.push(data.soc !== undefined ? data.soc : 0);
     batteryChart.data.datasets[1].data.push(bat);
     batteryChart.update('none');
 
@@ -727,7 +730,8 @@ function updateDashboard(data) {
     powerChart.update('none');
 
     // Modbus log
-    addModbusLog(`${new Date().toLocaleTimeString()} - PV:${Math.round(pv)}W Load:${Math.round(load)}W Bat:${Math.round(bat)}W SoC:${(data.soc||0).toFixed(1)}%`);
+    const soc = data.soc !== undefined ? data.soc : 0;
+    addModbusLog(`${new Date().toLocaleTimeString()} - PV:${Math.round(pv)}W Load:${Math.round(load)}W Bat:${Math.round(bat)}W SoC:${soc.toFixed(1)}%`);
 }
 
 function addModbusLog(text) {
